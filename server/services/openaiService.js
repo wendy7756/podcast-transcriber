@@ -68,6 +68,21 @@ ${summary}${sourceSection}
 const WHISPER_MODEL = process.env.WHISPER_MODEL || 'base'; // Whisper模型大小
 console.log(`🎤 转录模式: 本地Faster-Whisper`);
 
+function getTextModel() {
+    const baseURL = process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1';
+    const customModel = process.env.OPENAI_MODEL;
+
+    if (customModel) {
+        return customModel;
+    }
+
+    if (baseURL.includes('generativelanguage.googleapis.com')) {
+        return 'gemini-2.5-flash';
+    }
+
+    return 'gpt-4.1-mini';
+}
+
 // 初始化OpenAI客户端（用于总结和文本优化）
 const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
@@ -139,7 +154,7 @@ async function processAudioWithOpenAI(audioFiles, shouldSummarize = false, outpu
             
             // 发送优化阶段进度
             if (sendProgressCallback) {
-                sendProgressCallback(50, 'optimizing', outputLanguage === 'zh' ? '优化转录文本' : 'Optimizing transcript');
+                sendProgressCallback(sessionId, 50, 'optimizing', outputLanguage === 'zh' ? '优化转录文本' : 'Optimizing transcript');
             }
             
             for (let retryCount = 0; retryCount < 3; retryCount++) {
@@ -605,7 +620,7 @@ Original transcript text:
 ${rawTranscript}`;
 
         const response = await openai.chat.completions.create({
-            model: 'gpt-3.5-turbo',
+            model: getTextModel(),
             messages: [
                 {
                     role: 'system',
@@ -684,7 +699,7 @@ Requirements:
 Please output the optimized text directly in the original language without any explanations or annotations.`;
 
         const response = await openai.chat.completions.create({
-            model: "gpt-4",
+            model: getTextModel(),
             messages: [
                 { role: "system", content: systemPrompt },
                 { role: "user", content: rawTranscript }
@@ -858,7 +873,7 @@ async function generateDirectSummary(transcript, outputLanguage) {
     const systemPrompt = getSystemPromptByLanguage(outputLanguage);
 
         const response = await openai.chat.completions.create({
-            model: "gpt-4",
+            model: getTextModel(),
             messages: [
                 { role: "system", content: systemPrompt },
                 { role: "user", content: transcript }
@@ -1030,7 +1045,7 @@ async function generateChunkSummary(chunkText, outputLanguage) {
     const systemPrompt = getChunkSummaryPrompt(outputLanguage);
 
     const response = await openai.chat.completions.create({
-        model: "gpt-4",
+        model: getTextModel(),
         messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: chunkText }
@@ -1122,7 +1137,7 @@ async function generateFinalSummary(combinedSummary, outputLanguage) {
     const systemPrompt = getFinalSummaryPrompt(outputLanguage);
 
     const response = await openai.chat.completions.create({
-                model: "gpt-4",
+                model: getTextModel(),
                 messages: [
             { role: "system", content: systemPrompt },
                     { role: "user", content: combinedSummary }
@@ -1199,7 +1214,7 @@ Original transcript text:
 ${chunkText}`;
 
         const response = await openai.chat.completions.create({
-            model: 'gpt-3.5-turbo',
+            model: getTextModel(),
             messages: [
                 {
                     role: 'system',
@@ -1662,7 +1677,7 @@ async function translateDirect(transcript, sourceName, targetName) {
 ${transcript}`;
 
     const response = await openai.chat.completions.create({
-        model: "gpt-4o",
+        model: getTextModel(),
         messages: [
             {
                 role: "user",
