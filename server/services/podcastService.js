@@ -14,7 +14,7 @@ async function downloadPodcastAudio(url) {
         console.log(`开始处理播客链接: ${url}`);
 
         // 检测链接类型并获取音频URL和播客信息
-        const podcastInfo = await extractAudioUrl(url);
+        const podcastInfo = normalizePodcastInfo(await extractAudioUrl(url));
         
         if (!podcastInfo || !podcastInfo.audioUrl) {
             throw new Error('无法提取音频链接 / Cannot extract audio URL');
@@ -73,6 +73,42 @@ async function extractAudioUrl(url) {
         console.error('提取音频URL错误:', error);
         throw error;
     }
+}
+
+function normalizePodcastInfo(podcastInfo) {
+    if (typeof podcastInfo === 'string') {
+        return {
+            audioUrl: podcastInfo,
+            title: 'Untitled Podcast',
+            description: ''
+        };
+    }
+
+    return podcastInfo;
+}
+
+function escapeRegExp(value) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function extractMetaContent(html, key) {
+    const metaMatch = html.match(new RegExp(`<meta[^>]+(?:property|name)=["']${escapeRegExp(key)}["'][^>]*>`, 'i'));
+    if (!metaMatch) {
+        return '';
+    }
+
+    const contentMatch = metaMatch[0].match(/content=["']([^"']+)["']/i);
+    return contentMatch ? contentMatch[1].trim() : '';
+}
+
+function extractPageTitle(html) {
+    const ogTitle = extractMetaContent(html, 'og:title');
+    if (ogTitle) {
+        return ogTitle;
+    }
+
+    const titleMatch = html.match(/<title>(.*?)<\/title>/i);
+    return titleMatch ? titleMatch[1].replace(/\s+/g, ' ').trim() : '';
 }
 
 /**
@@ -340,21 +376,32 @@ async function extractXiaoyuzhouAudio(url) {
                 },
                 timeout: 15000
             });
+
+            const html = pageResponse.data;
+            const title = extractPageTitle(html);
+            const description = extractMetaContent(html, 'og:description');
             
             // 从og:audio meta标签提取音频链接
-            const ogAudioMatch = pageResponse.data.match(/<meta\s+property="og:audio"\s+content="([^"]+)"/);
-            if (ogAudioMatch) {
-                const audioUrl = ogAudioMatch[1];
+            const ogAudioUrl = extractMetaContent(html, 'og:audio');
+            if (ogAudioUrl) {
                 console.log('从小宇宙网页og:audio成功获取到音频链接');
-                return audioUrl;
+                return {
+                    audioUrl: ogAudioUrl,
+                    title,
+                    description
+                };
             }
             
             // 备用方案：从JSON-LD结构化数据提取
-            const jsonLdMatch = pageResponse.data.match(/"contentUrl":"([^"]+\.m4a)"/);
+            const jsonLdMatch = html.match(/"contentUrl":"([^"]+\.m4a)"/);
             if (jsonLdMatch) {
                 const audioUrl = jsonLdMatch[1];
                 console.log('从小宇宙JSON-LD数据获取到音频链接');
-                return audioUrl;
+                return {
+                    audioUrl,
+                    title,
+                    description
+                };
             }
             
         } catch (pageError) {
@@ -365,10 +412,23 @@ async function extractXiaoyuzhouAudio(url) {
         try {
             const rssUrl = await getXiaoyuzhouRSS(url);
             if (rssUrl) {
+                if (isDirectAudioUrl(rssUrl)) {
+                    console.log('从小宇宙API获取到音频链接');
+                    return {
+                        audioUrl: rssUrl,
+                        title: 'Untitled Episode',
+                        description: ''
+                    };
+                }
+
                 const audioItems = await parseRSSFeed(rssUrl);
                 if (audioItems && audioItems.length > 0) {
                     console.log('从小宇宙RSS获取到音频链接');
-                    return audioItems[0].audioUrl; // 返回第一个音频项目
+                    return {
+                        audioUrl: audioItems[0].audioUrl,
+                        title: audioItems[0].title || 'Untitled Episode',
+                        description: audioItems[0].description || ''
+                    };
                 }
             }
         } catch (rssError) {
@@ -382,7 +442,11 @@ async function extractXiaoyuzhouAudio(url) {
                 const audioItems = await parseRSSFeed(discoveredRSS);
                 if (audioItems && audioItems.length > 0) {
                     console.log('从发现的RSS获取到音频链接');
-                    return audioItems[0].audioUrl;
+                    return {
+                        audioUrl: audioItems[0].audioUrl,
+                        title: audioItems[0].title || 'Untitled Episode',
+                        description: audioItems[0].description || ''
+                    };
                 }
             }
         } catch (discoverError) {
